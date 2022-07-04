@@ -9,10 +9,9 @@ APP=persist_logger
 .PHONY: all clean install uninstal
 
 all: $(APP)
-	$(STRIP) -s -o $(APP).stripped $(APP)
 
 clean:
-	rm -f $(APP) $(APP).stripped
+	rm -f $(APP) $(APP).o
 
 install: persist_logger
 	install -D -m 555 $(APP) $(DESTDIR)$(PREFIX)/bin/$(APP)

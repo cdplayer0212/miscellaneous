@@ -237,7 +237,7 @@ static int parser_argv(int argc, char *argv[], struct __info *info)
 				goto error_out;
 			} else {
 				info->log_size = long_tmp * ONE_KBYTES_CNT;
-			};
+			}
 			break;
 		case 'c':
 			long_tmp = strtol(optarg, NULL, 10);

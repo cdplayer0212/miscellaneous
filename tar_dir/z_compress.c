@@ -12,10 +12,6 @@
 
 #define CHUNK (4096 * 4)
 
-#define DIR_PATH		"mfgdata"
-#define DEFAULT_FILE_PATH	"."
-#define DEFAULT_FILE_NAME	DIR_PATH".tar"
-
 struct z_comp_data {
 	int z_comp_level;
 	char target_dir[64]; /* /data/mfgdata ??? */
@@ -161,9 +157,7 @@ int compress_dir(struct z_comp_data *data)
 static void init_z_compress_data(struct z_comp_data *data)
 {
 	memset(data, 0x0, sizeof(struct z_comp_data));
-	//data->z_comp_level = Z_DEFAULT_COMPRESSION;
 
-#if 0
 	strncpy(data->target_dir, "/data/mfgdata",
 				sizeof(data->target_dir) - 1);
 	strncpy(data->target_tar_file, "/tmp/mfgdata_XXXXX.tar",
@@ -173,18 +167,6 @@ static void init_z_compress_data(struct z_comp_data *data)
 	data->target_src_zip_file = data->target_tar_file;
 	strncpy(data->target_dest_zip_file, "/tmp/mfgdata_XXXXX.tar.bz2",
 				sizeof(data->target_dest_zip_file) - 1);
-#else
-	strncpy(data->target_dir, "/home/cdplayer0212/tmp/zlib-1.2.13/examples/qbic/mfgdata",
-				sizeof(data->target_dir) - 1);
-	strncpy(data->target_tar_file, "/home/cdplayer0212/tmp/zlib-1.2.13/examples/qbic/mfgdata_XXXXX.tar",
-				sizeof(data->target_tar_file) - 1);
-	strncpy(data->target_tar_extract_to, "mfgdata_XXXXX",
-				sizeof(data->target_tar_extract_to) - 1);
-	data->target_src_zip_file = data->target_tar_file;
-	strncpy(data->target_dest_zip_file, "/home/cdplayer0212/tmp/zlib-1.2.13/examples/qbic/mfgdata_XXXXX.tar.bz2",
-				sizeof(data->target_dest_zip_file) - 1);
-
-#endif
 }
 
 int main(int argc, char *argv[])

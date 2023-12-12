@@ -105,7 +105,9 @@ static gboolean camera_preview_thread(gpointer data)
 		return TRUE;
 	}
 	cdata->raw_image_status = RAW_IMAGE_FETCHED;
-	cdata->image_count++;
+	if (cdata->show_fps)
+		cdata->image_count++;
+
 	gtk_widget_queue_draw(camera_preview);
 
 	if (camera_preview_window_is_on == FALSE)
@@ -150,9 +152,11 @@ static gboolean camera_preview_start_thread(gpointer data)
 	/* 1000 / 33 = 30 fps */
 	gdk_threads_add_timeout(30, (GSourceFunc)camera_preview_thread, cdata);
 #ifdef CALC_FPS
-	cdata->fps_val = 0;
-	gdk_threads_add_timeout(1000, (GSourceFunc)camera_update_fps_thread,
-									cdata);
+	if (cdata->show_fps) {
+		cdata->fps_val = 0;
+		gdk_threads_add_timeout(1000,
+				(GSourceFunc)camera_update_fps_thread, cdata);
+	}
 #endif /* CALC_FPS */
 	return FALSE;
 }
@@ -165,7 +169,7 @@ int camera_data_init(struct camera_util_data *camera_data)
 	camera_data->camera_width = CAMERA_PREVIEW_WIDTH;
 	camera_data->camera_height = CAMERA_PREVIEW_HEIGHT;
 	camera_data->camera_depth = CAMERA_PREVIEW_DEPTH;
-	camera_data->format = CAMERA_FORMAT_YUYV;
+	camera_data->format = CAMERA_FORMAT_MJPEG;
 
 	return 0;
 }
@@ -175,7 +179,8 @@ int camera_post_exit(struct camera_util_data *camera_data)
 	return 0;
 }
 
-static void camera_preview_window_cb(GtkWidget *widget, gpointer user_data)
+static void camera_preview_destroy_window_cb(GtkWidget *widget,
+							gpointer user_data)
 {
 	struct camera_util_data *camera_data =
 					(struct camera_util_data *)user_data;
@@ -210,7 +215,8 @@ static void camera_preview_win_activate(GtkApplication *app, gpointer user_data)
 	gtk_window_set_title(GTK_WINDOW(camera_preview_window),
 							"Camera Preview");
 	g_signal_connect(G_OBJECT(camera_preview_window),
-		"destroy", G_CALLBACK(camera_preview_window_cb), camera_data);
+		"destroy", G_CALLBACK(camera_preview_destroy_window_cb),
+		camera_data);
 
 	camera_preview_grid = gtk_grid_new();
 	gtk_widget_set_valign(camera_preview_grid, GTK_ALIGN_CENTER);

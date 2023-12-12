@@ -31,6 +31,7 @@ enum __raw_image_status {
 enum __camera_format {
 	CAMERA_FORMAT_NONE_SET = 0,
 	CAMERA_FORMAT_YUYV,
+	CAMERA_FORMAT_MJPEG,
 	CAMERA_FORMAT_H264,
 };
 

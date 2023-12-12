@@ -14,8 +14,11 @@
 #include <linux/videodev2.h>
 
 #include "camera_util.h"
+#include "camera_util_jpeg.h"
 
 #include "mfg_logger.h"
+
+/* #define STORE_RAW_IMAG_TO_FILE */
 
 static int xioctl(int *fd, int request, void *arg)
 {
@@ -122,30 +125,61 @@ int yuv422_rgb24(unsigned char *yuv_buf, unsigned char *rgb_buf,
 	return 0;
 }
 
-/* #define STORE_RAW_IMAG_TO_FILE */
-static void process_image(struct camera_util_data *data)
+/* fill gray to rgb buffer */
+static void rgb_buffer_fill_gray(struct camera_util_data *data)
 {
+	memset(data->rgb_buffer, 0x7F, sizeof(data->rgb_buffer));
+}
+
 #ifdef STORE_RAW_IMAG_TO_FILE
+static void store_raw_image(char *data, size_t data_len)
+{
 	int ret;
 	int fd;
-#endif /* STORE_RAW_IMAG_TO_FILE */
 
-	yuv422_rgb24(data->buffers[data->buf.index].start,
-		data->rgb_buffer, data->camera_width, data->camera_height);
-
-#ifdef STORE_RAW_IMAG_TO_FILE
 	/* write to file */
 	fd = open("/tmp/video.raw", O_WRONLY | O_CREAT | O_TRUNC, 0644);
 	if (fd == -1)
 		return;
 
-	ret = write(fd, data->buffers[data->buf.index].start,
-							data->buf.bytesused);
+	ret = write(fd, data, data_len);
 	if (ret == -1)
 		ret = errno;
 	fsync(fd);
 	close(fd);
+}
+#else /* STORE_RAW_IMAG_TO_FILE */
+static void store_raw_image(char *data, size_t data_len)
+{
+}
 #endif /* STORE_RAW_IMAG_TO_FILE */
+
+static void process_image(struct camera_util_data *data)
+{
+	yuv422_rgb24(data->buffers[data->buf.index].start,
+		data->rgb_buffer, data->camera_width, data->camera_height);
+}
+
+static void process_jpeg_image(struct camera_util_data *data)
+{
+	int ret;
+	unsigned char *buff_ptr;
+
+	buff_ptr = (unsigned char *)data->buffers[data->buf.index].start;
+	/* check SOI of the jpeg header */
+	if (*buff_ptr != SOI_BYTE_0 || *(buff_ptr + 1) != SOI_BYTE_1) {
+		WARNING("get incorrect SOI of the JFIF(0x%2.2X, 0x%2.2X)\n",
+						*buff_ptr, *(buff_ptr + 1));
+		rgb_buffer_fill_gray(data);
+	} else {
+		ret = jpeg_rgb24_decomp(buff_ptr,
+				data->buf.bytesused, data->rgb_buffer,
+				data->camera_width, data->camera_height);
+		if (ret != 0) {
+			ERR("JPEG convert failed\n");
+			rgb_buffer_fill_gray(data);
+		}
+	}
 }
 
 int start_capturing(struct camera_util_data *data)
@@ -241,6 +275,12 @@ int init_device(struct camera_util_data *data)
 {
 	unsigned int min;
 	int ret = 0;
+	const char *format_str[4] = {
+		"NONE_SET",
+		"YUYV",
+		"MJPEG",
+		"H264",
+	};
 
 	if (-1 == xioctl(&data->camera_fd, VIDIOC_QUERYCAP, &data->cap)) {
 		if (errno == EINVAL) {
@@ -255,12 +295,7 @@ int init_device(struct camera_util_data *data)
 		ERR("%s is no video capture device\n", data->dev_path);
 		return -errno;
 	}
-#if 1
-	if (!(data->cap.capabilities & V4L2_CAP_STREAMING)) {
-		ERR("%s does not support streaming i/o\n", data->dev_path);
-		return -EINVAL;
-	}
-#else
+#if 0
 	switch (data->io) {
 	case IO_METHOD_READ:
 		if (!(cap.capabilities & V4L2_CAP_READWRITE)) {
@@ -306,38 +341,8 @@ int init_device(struct camera_util_data *data)
 	memset(&data->fmt, 0x0, sizeof(data->fmt));
 
 	data->fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-	INFO("Force Format %d\n", data->format);
-#if 0
-	if (data->format) {
-		if (data->format == 2) {
-			data->fmt.fmt.pix.width		= data->camera_width;
-			data->fmt.fmt.pix.height	= data->camera_height;
-			data->fmt.fmt.pix.pixelformat	= V4L2_PIX_FMT_H264;
-			data->fmt.fmt.pix.field		= V4L2_FIELD_INTERLACED;
-		} else if (data->format == 1) {
-			data->fmt.fmt.pix.width		= data->camera_width;
-			data->fmt.fmt.pix.height	= data->camera_height;
-			data->fmt.fmt.pix.pixelformat	= V4L2_PIX_FMT_YUYV;
-			data->fmt.fmt.pix.field		= V4L2_FIELD_INTERLACED;
-		}
+	INFO("Use Format: %s\n", format_str[data->format]);
 
-		if (-1 == xioctl(&data->camera_fd, VIDIOC_S_FMT, &data->fmt)) {
-			ERR("VIDIOC_S_FMT failed, %s\n", strerror(errno));
-			return -errno;
-		}
-
-		/* Note VIDIOC_S_FMT may change width and height. */
-	} else {
-		/* Preserve original settings as set by v4l2-ctl for example */
-		if (-1 == xioctl(&data->camera_fd, VIDIOC_G_FMT, &data->fmt)) {
-			ERR("VIDIOC_G_FMT failed, %s\n", strerror(errno));
-			return -errno;
-		}
-
-		DEBUG("fmt.fmt.pix.width: %d\n", data->fmt.fmt.pix.width);
-		DEBUG("fmt.fmt.pix.height: %d\n", data->fmt.fmt.pix.height);
-	}
-#else
 	switch (data->format) {
 	case CAMERA_FORMAT_NONE_SET:
 		if (-1 == xioctl(&data->camera_fd, VIDIOC_G_FMT, &data->fmt)) {
@@ -353,6 +358,17 @@ int init_device(struct camera_util_data *data)
 		data->fmt.fmt.pix.field		= V4L2_FIELD_INTERLACED;
 		if (-1 == xioctl(&data->camera_fd, VIDIOC_S_FMT, &data->fmt)) {
 			ERR("CAMERA_FORMAT_YUYV: VIDIOC_S_FMT failed, %s\n",
+							strerror(errno));
+			return -errno;
+		}
+		break;
+	case CAMERA_FORMAT_MJPEG:
+		data->fmt.fmt.pix.width		= data->camera_width;
+		data->fmt.fmt.pix.height	= data->camera_height;
+		data->fmt.fmt.pix.pixelformat	= V4L2_PIX_FMT_MJPEG;
+		data->fmt.fmt.pix.field		= V4L2_FIELD_INTERLACED;
+		if (-1 == xioctl(&data->camera_fd, VIDIOC_S_FMT, &data->fmt)) {
+			ERR("V4L2_PIX_FMT_MJPEG: VIDIOC_S_FMT failed, %s\n",
 							strerror(errno));
 			return -errno;
 		}
@@ -373,7 +389,7 @@ int init_device(struct camera_util_data *data)
 		return -1;
 		break;
 	};
-#endif
+
 	/* Buggy driver paranoia. */
 	min = data->fmt.fmt.pix.width * 2;
 	if (data->fmt.fmt.pix.bytesperline < min)
@@ -415,9 +431,12 @@ static int read_frame(struct camera_util_data *data)
 		}
 	}
 
-	if (data->buf.index < CAMERA_BUFFER_CNT &&
+	if (data->format == CAMERA_FORMAT_YUYV &&
+				data->buf.index < CAMERA_BUFFER_CNT &&
 				data->buf.bytesused == data->camera_buff_size)
 		process_image(data);
+	else if (data->format == CAMERA_FORMAT_MJPEG)
+		process_jpeg_image(data);
 	else
 		ERR("incorrect index: %d, %d, size: %d, %d\n",
 					data->buf.index, CAMERA_BUFFER_CNT,
@@ -537,6 +556,14 @@ int start_camera_preview(struct camera_util_data *data)
 		ERR("open_device %s failed(ret: %d)\n", data->dev_path, ret);
 		return ret;
 	}
+	if (data->format == CAMERA_FORMAT_MJPEG) {
+		ret = jpeg_decomp_init(data->camera_width, data->camera_height,
+							data->camera_depth);
+		if (ret != 0) {
+			ERR("init jpeg_decomp failed(ret: %d)\n", ret);
+			return ret;
+		}
+	}
 	ret = init_device(data);
 	if (ret != 0) {
 		ERR("init_device failed(ret: %d)\n", ret);
@@ -565,6 +592,11 @@ int stop_camera_preview(struct camera_util_data *data)
 	if (ret != 0) {
 		ERR("uninit_device failed(ret: %d)\n", ret);
 		return ret;
+	}
+	if (data->format == CAMERA_FORMAT_MJPEG) {
+		ret = jpeg_decomp_uninit();
+		if (ret != 0)
+			ERR("uninit jpeg_decomp failed(ret: %d)\n", ret);
 	}
 	ret = close_device(data);
 	if (ret != 0) {
